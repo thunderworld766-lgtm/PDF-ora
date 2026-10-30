@@ -1,14 +1,15 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { UserProfile } from '../types';
 import { storageService } from '../services/storageService';
+import { firebaseAuth } from '../services/firebase';
 
 interface AuthContextType {
   user: UserProfile | null;
   isAuthenticated: boolean;
-  login: (email: string, pass: string) => Promise<boolean>;
-  signup: (name: string, email: string, pass: string) => Promise<boolean>;
-  logout: () => void;
-  continueAsGuest: () => void;
+  isAuthLoading: boolean;
+  loginWithGoogle: () => Promise<boolean>;
+  logout: () => Promise<void>;
   updateUser: (updates: Partial<UserProfile>) => void;
   showAuthModal: boolean;
   setShowAuthModal: (show: boolean) => void;
@@ -19,61 +20,42 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(() => storageService.getUserProfile());
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'signup' | 'forgot'>('login');
 
-  const login = async (email: string): Promise<boolean> => {
-    // Simulated smooth auth
-    const currentProfile = storageService.getUserProfile();
-    const updatedUser = {
-      ...currentProfile,
-      email: email || currentProfile.email,
-    };
-    setUser(updatedUser);
-    setIsAuthenticated(true);
-    storageService.saveUserProfile(updatedUser);
+  useEffect(() => onAuthStateChanged(firebaseAuth, (firebaseUser) => {
+    if (firebaseUser) {
+      const profile: UserProfile = {
+        id: firebaseUser.uid,
+        name: firebaseUser.displayName || 'PDFora User',
+        email: firebaseUser.email || '',
+        avatar: firebaseUser.photoURL || '',
+        tier: 'Free',
+        storageUsedBytes: 0,
+        storageLimitBytes: 500 * 1024 * 1024,
+        createdAt: firebaseUser.metadata.creationTime || new Date().toISOString(),
+      };
+      setUser(profile);
+      storageService.saveUserProfile(profile);
+    } else {
+      setUser(null);
+      storageService.clearUserProfile();
+    }
+    setIsAuthLoading(false);
+  }), []);
+
+  const loginWithGoogle = async (): Promise<boolean> => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithPopup(firebaseAuth, provider);
     setShowAuthModal(false);
     return true;
   };
 
-  const signup = async (name: string, email: string): Promise<boolean> => {
-    const newUser: UserProfile = {
-      id: `usr_${Date.now()}`,
-      name: name || 'PDFora Creator',
-      email: email || 'creator@pdfora.io',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      tier: 'Pro',
-      storageUsedBytes: 0,
-      storageLimitBytes: 10 * 1024 * 1024 * 1024,
-      createdAt: new Date().toISOString(),
-    };
-    setUser(newUser);
-    setIsAuthenticated(true);
-    storageService.saveUserProfile(newUser);
-    setShowAuthModal(false);
-    return true;
-  };
-
-  const logout = () => {
-    setUser(null);
-    setIsAuthenticated(false);
-  };
-
-  const continueAsGuest = () => {
-    const guestUser: UserProfile = {
-      id: `guest_${Date.now()}`,
-      name: 'Guest Explorer',
-      email: 'guest@pdfora.io',
-      tier: 'Free',
-      storageUsedBytes: 0,
-      storageLimitBytes: 500 * 1024 * 1024,
-      createdAt: new Date().toISOString(),
-    };
-    setUser(guestUser);
-    setIsAuthenticated(true);
-    setShowAuthModal(false);
+  const logout = async () => {
+    await signOut(firebaseAuth);
   };
 
   const updateUser = (updates: Partial<UserProfile>) => {
@@ -84,21 +66,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated,
-        login,
-        signup,
-        logout,
-        continueAsGuest,
-        updateUser,
-        showAuthModal,
-        setShowAuthModal,
-        authModalMode,
-        setAuthModalMode,
-      }}
-    >
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated: Boolean(user),
+      isAuthLoading,
+      loginWithGoogle,
+      logout,
+      updateUser,
+      showAuthModal,
+      setShowAuthModal,
+      authModalMode,
+      setAuthModalMode,
+    }}>
       {children}
     </AuthContext.Provider>
   );

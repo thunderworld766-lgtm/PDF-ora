@@ -69,7 +69,7 @@ export const DashboardView: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Your client-side document workstation is running with zero data leakage.
+              Your PDF editing tools run locally in your browser.
             </p>
           </div>
 
@@ -79,7 +79,7 @@ export const DashboardView: React.FC = () => {
               className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Load Interactive Demo</span>
+              <span>Open Sample PDF</span>
             </button>
             <button
               onClick={() => setCurrentView('editor')}
@@ -101,7 +101,7 @@ export const DashboardView: React.FC = () => {
             </div>
             <div className="text-2xl font-black text-white">{documents.length}</div>
             <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-              <span>● Local client vault synced</span>
+              <span>● Stored in this browser</span>
             </div>
           </div>
 
@@ -135,9 +135,9 @@ export const DashboardView: React.FC = () => {
               <span className="text-xs font-semibold">Security Architecture</span>
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
-            <div className="text-lg font-bold text-emerald-400">Air-Gapped Private</div>
+            <div className="text-lg font-bold text-emerald-400">Browser Processing</div>
             <div className="text-[11px] text-slate-400 mt-1">
-              Zero outbound data transmission
+              PDF edits stay on your device
             </div>
           </div>
 

@@ -211,7 +211,7 @@ export const EditorWorkspace: React.FC = () => {
               className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white font-semibold text-xs flex items-center justify-center gap-2 transition-all"
             >
               <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Open Interactive Demo Document</span>
+              <span>Open Sample PDF</span>
             </button>
           </div>
         </div>

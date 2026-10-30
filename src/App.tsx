@@ -1,5 +1,5 @@
 import React from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { DocumentProvider, useDocument } from './context/DocumentContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Navbar } from './components/common/Navbar';
@@ -15,7 +15,18 @@ import { MyDocumentsView } from './components/documents/MyDocumentsView';
 import { SettingsView } from './components/settings/SettingsView';
 
 const AppContent: React.FC = () => {
-  const { currentView } = useDocument();
+  const { currentView, setCurrentView } = useDocument();
+  const { isAuthenticated, isAuthLoading } = useAuth();
+
+  React.useEffect(() => {
+    if (isAuthLoading) return;
+
+    if (isAuthenticated && currentView === 'landing') {
+      setCurrentView('dashboard');
+    } else if (!isAuthenticated && ['dashboard', 'documents', 'settings'].includes(currentView)) {
+      setCurrentView('landing');
+    }
+  }, [isAuthLoading, isAuthenticated, currentView, setCurrentView]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">

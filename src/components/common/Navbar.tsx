@@ -32,6 +32,9 @@ export const Navbar: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'documents', label: 'My Vault', icon: <FolderArchive className="w-4 h-4" /> },
   ];
+  const visibleNavLinks = isAuthenticated
+    ? navLinks
+    : navLinks.filter((link) => link.id === 'landing' || link.id === 'tools' || link.id === 'editor');
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl transition-colors">
@@ -53,7 +56,7 @@ export const Navbar: React.FC = () => {
                 PDF<span className="text-brand-400">ora</span>
               </span>
               <span className="text-[10px] px-1.5 py-0.5 font-semibold bg-brand-500/15 text-brand-300 border border-brand-500/30 rounded-full tracking-wider uppercase">
-                v1.0 Pro
+PDF Tools
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden sm:block tracking-wide">
@@ -64,7 +67,7 @@ export const Navbar: React.FC = () => {
 
         {/* Center Navigation Navigation */}
         <nav className="hidden md:flex items-center gap-1 bg-slate-900/60 p-1.5 rounded-full border border-slate-800/80">
-          {navLinks.map((link) => {
+          {visibleNavLinks.map((link) => {
             const isActive = currentView === link.id;
             return (
               <button
@@ -111,7 +114,7 @@ export const Navbar: React.FC = () => {
             className="hidden sm:inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-lg shadow-brand-600/20 active:scale-95 transition-all"
           >
             <Zap className="w-3.5 h-3.5 fill-current text-amber-300" />
-            <span>{pdfBytes ? 'Return to Editor' : 'Try Live Demo'}</span>
+            <span>{pdfBytes ? 'Return to Editor' : 'Try Sample PDF'}</span>
           </button>
 
           {/* Settings Shortcut */}
@@ -150,7 +153,7 @@ export const Navbar: React.FC = () => {
                   <div className="text-xs font-semibold text-slate-200 group-hover:text-white flex items-center gap-1">
                     {user.name.split(' ')[0]}
                     <span className="text-[10px] text-brand-400 bg-brand-500/10 px-1 rounded border border-brand-500/20">
-                      {user.tier}
+                      Account
                     </span>
                   </div>
                   <div className="text-[10px] text-slate-400">
@@ -195,7 +198,7 @@ export const Navbar: React.FC = () => {
 
       {/* Mobile Sub-Navigation Bar */}
       <div className="md:hidden flex items-center justify-around border-t border-slate-800/80 bg-slate-950/90 py-2 px-3">
-        {navLinks.map((link) => (
+        {visibleNavLinks.map((link) => (
           <button
             key={link.id}
             onClick={() => {

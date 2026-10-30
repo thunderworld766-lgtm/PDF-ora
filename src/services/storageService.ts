@@ -7,84 +7,35 @@ const STORAGE_KEYS = {
   THEME: 'pdfora_theme_mode',
 };
 
-const DEFAULT_USER: UserProfile = {
-  id: 'usr_pdfora_demo',
-  name: 'Alex Morgan',
-  email: 'alex.morgan@pdfora.io',
-  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  tier: 'Pro',
-  storageUsedBytes: 124 * 1024 * 1024, // 124 MB
-  storageLimitBytes: 10 * 1024 * 1024 * 1024, // 10 GB
-  createdAt: '2026-01-15T09:00:00Z',
-};
-
 const DEFAULT_INTEGRATION: IntegrationConfig = {
-  supabaseUrl: 'https://xyzcompany.supabase.co',
+  supabaseUrl: '',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-  cloudflareR2AccountId: 'a1b2c3d4e5f6g7h8',
-  cloudflareR2BucketName: 'pdfora-production-vault',
-  cloudflareR2AccessKey: 'r2_acc_938172938172',
-  cloudflareR2SecretKey: '••••••••••••••••••••••••••••••••',
+  cloudflareR2AccountId: '',
+  cloudflareR2BucketName: '',
+  cloudflareR2AccessKey: '',
+  cloudflareR2SecretKey: '',
   isR2Enabled: false,
   isSupabaseEnabled: false,
 };
 
-// Initial starter documents so the dashboard and file manager look vibrant out of the box
-const STARTER_DOCUMENTS: DocumentItem[] = [
-  {
-    id: 'doc_1',
-    name: 'Executive_Q3_Strategic_Brief.pdf',
-    sizeBytes: 2450000,
-    pageCount: 14,
-    updatedAt: '2026-10-28T14:32:00Z',
-    createdAt: '2026-10-20T10:15:00Z',
-    tags: ['Strategy', 'Executive', 'Confidential'],
-    isStarred: true,
-  },
-  {
-    id: 'doc_2',
-    name: 'Master_Services_Agreement_Signed.pdf',
-    sizeBytes: 1120000,
-    pageCount: 6,
-    updatedAt: '2026-10-29T19:10:00Z',
-    createdAt: '2026-10-25T11:40:00Z',
-    tags: ['Contracts', 'Legal', 'Signed'],
-    isStarred: true,
-  },
-  {
-    id: 'doc_3',
-    name: 'Product_Design_Tokens_v2.4.pdf',
-    sizeBytes: 3840000,
-    pageCount: 22,
-    updatedAt: '2026-10-24T08:20:00Z',
-    createdAt: '2026-10-18T16:00:00Z',
-    tags: ['Design', 'Specs'],
-    isStarred: false,
-  },
-  {
-    id: 'doc_4',
-    name: 'Annual_Financial_Audit_Report.pdf',
-    sizeBytes: 5200000,
-    pageCount: 38,
-    updatedAt: '2026-10-21T16:45:00Z',
-    createdAt: '2026-10-12T09:30:00Z',
-    tags: ['Finance', 'Tax'],
-    isStarred: false,
-  },
-];
+const STARTER_DOCUMENTS: DocumentItem[] = [];
 
 export const storageService = {
-  getUserProfile(): UserProfile {
+  getUserProfile(): UserProfile | null {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.USER);
-      return stored ? JSON.parse(stored) : DEFAULT_USER;
+      return stored ? JSON.parse(stored) : null;
     } catch {
-      return DEFAULT_USER;
+      return null;
     }
   },
 
   saveUserProfile(profile: UserProfile): void {
     localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(profile));
+  },
+
+  clearUserProfile(): void {
+    localStorage.removeItem(STORAGE_KEYS.USER);
   },
 
   getDocuments(): DocumentItem[] {

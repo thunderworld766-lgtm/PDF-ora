@@ -258,7 +258,7 @@ export const LandingPage: React.FC = () => {
             </h2>
           </div>
           <p className="text-xs text-slate-400 max-w-md mt-4 md:mt-0">
-            No limits, no watermarks, no signups required. Engineered for professionals, legal teams, and developers.
+            Browser-based tools for document editing, conversion, and page management.
           </p>
         </div>
 
@@ -361,7 +361,7 @@ export const LandingPage: React.FC = () => {
 
                   <div className="border border-dashed border-brand-400 rounded p-1 bg-brand-50/50">
                     <span className="text-[6px] text-brand-600 font-bold block mb-1">Signed via PDFora</span>
-                    <div className="text-[9px] font-serif italic text-brand-900">Alex Morgan</div>
+                    <div className="text-[9px] font-serif italic text-brand-900">Your Signature</div>
                   </div>
                 </div>
 
@@ -491,7 +491,7 @@ export const LandingPage: React.FC = () => {
             Ready to experience the future of PDF editing?
           </h2>
           <p className="text-sm text-indigo-100 max-w-xl mx-auto mb-8">
-            Start immediately without creating an account or download our sample document to test vector annotations in action.
+            Try the browser tools immediately, or sign in with Google to access your dashboard and saved documents.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4">
             <button
@@ -499,7 +499,7 @@ export const LandingPage: React.FC = () => {
               className="px-6 py-3 rounded-xl bg-white text-brand-700 hover:bg-slate-100 font-bold text-xs shadow-xl active:scale-95 transition-all flex items-center gap-2"
             >
               <Sparkles className="w-4 h-4 text-brand-600" />
-              <span>Open Sample Document in Workspace</span>
+  <span>Open Sample Document</span>
             </button>
             <button
               onClick={() => setCurrentView('tools')}

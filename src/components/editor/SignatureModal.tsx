@@ -16,7 +16,7 @@ export const SignatureModal: React.FC<SignatureModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [activeTab, setActiveTab] = useState<'draw' | 'type'>('draw');
-  const [typedName, setTypedName] = useState('Alex Morgan');
+  const [typedName, setTypedName] = useState('Your Name');
   const [inkColor, setInkColor] = useState('#1e293b'); // dark navy slate
 
   useEffect(() => {
