@@ -46,7 +46,7 @@ export interface DocumentItem {
 export interface Annotation {
   id: string;
   pageNumber: number;
-  type: 'text' | 'signature' | 'draw' | 'highlight' | 'stamp' | 'rect';
+  type: 'text' | 'signature' | 'draw' | 'highlight' | 'underline' | 'sticky' | 'stamp' | 'rect' | 'ellipse' | 'line';
   x: number; // percentage or px
   y: number;
   width?: number;

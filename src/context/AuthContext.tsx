@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { GoogleAuthProvider, getRedirectResult, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 import { UserProfile } from '../types';
 import { storageService } from '../services/storageService';
 import { firebaseAuth } from '../services/firebase';
@@ -25,18 +25,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'signup' | 'forgot'>('login');
 
-  useEffect(() => onAuthStateChanged(firebaseAuth, (firebaseUser) => {
-    if (firebaseUser) {
-      const profile: UserProfile = {
-        id: firebaseUser.uid,
-        name: firebaseUser.displayName || 'PDFora User',
-        email: firebaseUser.email || '',
-        avatar: firebaseUser.photoURL || '',
-        tier: 'Free',
-        storageUsedBytes: 0,
-        storageLimitBytes: 500 * 1024 * 1024,
-        createdAt: firebaseUser.metadata.creationTime || new Date().toISOString(),
-      };
+  useEffect(() => {
+    void getRedirectResult(firebaseAuth).catch((error) => {
+      console.error('Google redirect sign-in failed:', error?.code, error?.message);
+    });
+
+    return onAuthStateChanged(firebaseAuth, (firebaseUser) => {
+      if (firebaseUser) {
+        const profile: UserProfile = {
+          id: firebaseUser.uid,
+          name: firebaseUser.displayName || 'PDFora User',
+          email: firebaseUser.email || '',
+          avatar: firebaseUser.photoURL || '',
+          tier: 'Free',
+          storageUsedBytes: 0,
+          storageLimitBytes: 500 * 1024 * 1024,
+          createdAt: firebaseUser.metadata.creationTime || new Date().toISOString(),
+        };
       setUser(profile);
       storageService.saveUserProfile(profile);
     } else {
@@ -44,11 +49,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       storageService.clearUserProfile();
     }
     setIsAuthLoading(false);
-  }), []);
+    });
+  }, []);
 
   const loginWithGoogle = async (): Promise<boolean> => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
+
+    if (window.matchMedia('(max-width: 640px)').matches) {
+      await signInWithRedirect(firebaseAuth, provider);
+      return true;
+    }
+
     await signInWithPopup(firebaseAuth, provider);
     setShowAuthModal(false);
     return true;

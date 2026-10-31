@@ -15,7 +15,15 @@ export const AuthModal: React.FC = () => {
       await loginWithGoogle();
       addToast('success', 'Signed in successfully', 'Welcome to PDFora');
     } catch (error: any) {
-      addToast('error', 'Google sign-in failed', error?.message || 'Please try again');
+      if (error?.code === 'auth/unauthorized-domain') {
+        addToast(
+          'error',
+          'Google sign-in blocked',
+          `Add "${window.location.hostname}" in Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else {
+        addToast('error', 'Google sign-in failed', error?.message || 'Please try again');
+      }
     } finally {
       setIsLoading(false);
     }

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useDocument } from '../../context/DocumentContext';
 import { formatBytes, formatDate } from '../../utils/cn';
-import { createSamplePDF } from '../../services/samplePdfs';
+import { storageService } from '../../services/storageService';
 
 export const MyDocumentsView: React.FC = () => {
   const { 
@@ -45,12 +45,12 @@ export const MyDocumentsView: React.FC = () => {
 
   const handleOpenDoc = async (doc: any) => {
     try {
-      if (doc.fileData) {
-        await loadPdfFromBuffer(doc.fileData, doc.name);
-      } else {
-        const sample = await createSamplePDF(doc.name.replace('.pdf', ''));
-        await loadPdfFromBuffer(sample, doc.name);
+      const bytes = await storageService.getDocumentBytes(doc.id);
+      if (!bytes) {
+        addToast('error', 'Document unavailable', 'The original PDF is missing from this browser vault.');
+        return;
       }
+      await loadPdfFromBuffer(bytes, doc.name);
       setCurrentView('editor');
     } catch (err: any) {
       addToast('error', 'Could not open document', err.message);
@@ -59,11 +59,17 @@ export const MyDocumentsView: React.FC = () => {
 
   const handleUploadNew = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
+    if (file) {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        addToast('error', 'Invalid file type', 'Please select a valid PDF file.');
+        return;
+      }
       const buf = await file.arrayBuffer();
       await loadPdfFromBuffer(buf, file.name);
       setCurrentView('editor');
     }
+    e.target.value = '';
   };
 
   return (

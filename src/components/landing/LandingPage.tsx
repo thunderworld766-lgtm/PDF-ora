@@ -16,7 +16,6 @@ import {
   UploadCloud, 
   CheckCircle2, 
   CloudLightning, 
-  Database, 
   Globe2,
   FileCheck,
   ChevronRight,
@@ -29,37 +28,31 @@ export const LandingPage: React.FC = () => {
   const { loadSampleDocument, loadPdfFromBuffer, setCurrentView, navigateToTool, addToast } = useDocument();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.type !== 'application/pdf') {
-        addToast('error', 'Invalid file type', 'Please select a valid PDF file.');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = async () => {
-        if (reader.result) {
-          await loadPdfFromBuffer(reader.result as ArrayBuffer, file.name);
-          setCurrentView('editor');
-        }
-      };
-      reader.readAsArrayBuffer(file);
+  const openPdfFile = async (file?: File) => {
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      addToast('error', 'Invalid file type', 'Please select a valid PDF file.');
+      return;
     }
+    try {
+      const buffer = await file.arrayBuffer();
+      const loaded = await loadPdfFromBuffer(buffer, file.name);
+      if (loaded) setCurrentView('editor');
+    } catch (error: any) {
+      addToast('error', 'Could not open PDF', error?.message || 'Please choose a valid PDF file.');
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void openPdfFile(e.target.files?.[0]);
+    e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        if (reader.result) {
-          await loadPdfFromBuffer(reader.result as ArrayBuffer, file.name);
-          setCurrentView('editor');
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    }
+    e.stopPropagation();
+    void openPdfFile(e.dataTransfer.files?.[0]);
   };
 
   const toolsList: { id: ToolType; title: string; desc: string; icon: React.ReactNode; color: string; badge?: string }[] = [
@@ -174,7 +167,11 @@ export const LandingPage: React.FC = () => {
           className="mt-10 max-w-2xl mx-auto"
         >
           <div
-            onDragOver={(e) => e.preventDefault()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = 'copy';
+            }}
             onDrop={handleDrop}
             className="p-8 sm:p-10 rounded-3xl border-2 border-dashed border-brand-500/40 bg-gradient-to-b from-slate-900/90 to-slate-950/90 backdrop-blur-xl shadow-glow hover:border-brand-400 transition-all duration-300 group"
           >
@@ -372,63 +369,6 @@ export const LandingPage: React.FC = () => {
               </div>
             </div>
 
-          </div>
-        </div>
-      </section>
-
-      {/* Cloud Architecture Preview (Supabase & Cloudflare R2) */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="text-center mb-12">
-          <div className="text-xs font-bold uppercase tracking-wider text-brand-400 mb-2">
-            Scalable Cloud Roadmap
-          </div>
-          <h2 className="text-3xl font-extrabold text-white tracking-tight">
-            Designed for Supabase and Cloudflare R2 Integration
-          </h2>
-          <p className="text-xs text-slate-400 max-w-xl mx-auto mt-2">
-            A modular backend-agnostic architecture. Seamlessly sync metadata with PostgreSQL row-level security and store terabytes of PDFs on Cloudflare R2 with zero egress fees.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="p-8 rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-sm space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <Database className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Supabase PostgreSQL & Auth</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Stores document metadata, tag taxonomies, version history, and user authentication with granular Row-Level Security (RLS) policies.
-            </p>
-            <ul className="text-xs text-slate-300 space-y-2">
-              <li className="flex items-center gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>JWT Authentication & OAuth providers</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Instant realtime updates & team collaboration</span>
-              </li>
-            </ul>
-          </div>
-
-          <div className="p-8 rounded-2xl border border-slate-800 bg-slate-900/50 backdrop-blur-sm space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-              <CloudLightning className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Cloudflare R2 Object Storage</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Global S3-compatible asset store with 0 egress fees. Upload multi-gigabyte document archives securely with presigned URLs.
-            </p>
-            <ul className="text-xs text-slate-300 space-y-2">
-              <li className="flex items-center gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
-                <span>Direct client-to-bucket presigned uploads</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
-                <span>Sub-100ms global edge CDN delivery</span>
-              </li>
-            </ul>
           </div>
         </div>
       </section>

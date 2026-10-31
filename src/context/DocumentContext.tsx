@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Annotation, AppView, DocumentItem, PDFPageInfo, ToolType } from '../types';
 import { getPdfMetadata, generateThumbnail } from '../services/pdfService';
 import { createSamplePDF } from '../services/samplePdfs';
@@ -32,12 +32,16 @@ interface DocumentContextType {
   addAnnotation: (ann: Omit<Annotation, 'id'>) => void;
   removeAnnotation: (id: string) => void;
   clearAnnotations: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   pageRotations: Record<number, number>; // 0-based page index -> rotation in deg
   rotatePage: (pageIndex: number, degreesToAdd: number) => void;
 
   // Document management
   documents: DocumentItem[];
-  loadPdfFromBuffer: (buffer: Uint8Array | ArrayBuffer, fileName: string) => Promise<void>;
+  loadPdfFromBuffer: (buffer: Uint8Array | ArrayBuffer, fileName: string) => Promise<boolean>;
   loadSampleDocument: () => Promise<void>;
   saveCurrentToVault: () => Promise<DocumentItem | null>;
   deleteDocument: (id: string) => void;
@@ -68,6 +72,16 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [pageRotations, setPageRotations] = useState<Record<number, number>>({});
+  const undoStack = useRef<{ annotations: Annotation[]; rotations: Record<number, number> }[]>([]);
+  const redoStack = useRef<{ annotations: Annotation[]; rotations: Record<number, number> }[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const pushHistory = useCallback(() => {
+    undoStack.current = [...undoStack.current.slice(-49), { annotations, rotations: pageRotations }];
+    redoStack.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, [annotations, pageRotations]);
 
   const [documents, setDocuments] = useState<DocumentItem[]>(() => storageService.getDocuments());
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -87,8 +101,9 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loadPdfFromBuffer = useCallback(async (buffer: Uint8Array | ArrayBuffer, fileName: string) => {
     try {
       setIsLoadingPdf(true);
-      const uint8 = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+      const uint8 = buffer instanceof Uint8Array ? buffer.slice() : new Uint8Array(buffer.slice(0));
       const metadata = await getPdfMetadata(uint8);
+      if (!metadata.pageCount) throw new Error('The PDF has no readable pages.');
 
       setPdfBytes(uint8);
       setPdfFileName(fileName);
@@ -97,12 +112,18 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setCurrentPage(1);
       setAnnotations([]);
       setPageRotations({});
+      undoStack.current = [];
+      redoStack.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
       setZoomLevel(1.0);
 
       addToast('success', 'PDF Loaded Successfully', `${fileName} (${metadata.pageCount} pages) ready for editing.`);
+      return true;
     } catch (err: any) {
       console.error('Failed to load PDF buffer:', err);
       addToast('error', 'Error loading PDF', err.message || 'Please check if the file is a valid PDF');
+      return false;
     } finally {
       setIsLoadingPdf(false);
     }
@@ -122,6 +143,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [loadPdfFromBuffer, addToast]);
 
   const addAnnotation = (ann: Omit<Annotation, 'id'>) => {
+    pushHistory();
     const newAnn: Annotation = {
       ...ann,
       id: `ann_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -131,14 +153,40 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const removeAnnotation = (id: string) => {
+    if (!window.confirm('Remove this annotation?')) return;
+    pushHistory();
     setAnnotations(prev => prev.filter(a => a.id !== id));
   };
 
   const clearAnnotations = () => {
+    if (!annotations.length) return;
+    if (!window.confirm('Remove all annotations from this document?')) return;
+    pushHistory();
     setAnnotations([]);
   };
 
+  const undo = () => {
+    const previous = undoStack.current.pop();
+    if (!previous) return;
+    redoStack.current.push({ annotations, rotations: pageRotations });
+    setAnnotations(previous.annotations);
+    setPageRotations(previous.rotations);
+    setCanUndo(undoStack.current.length > 0);
+    setCanRedo(true);
+  };
+
+  const redo = () => {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    undoStack.current.push({ annotations, rotations: pageRotations });
+    setAnnotations(next.annotations);
+    setPageRotations(next.rotations);
+    setCanUndo(true);
+    setCanRedo(redoStack.current.length > 0);
+  };
+
   const rotatePage = (pageIndex: number, degreesToAdd: number) => {
+    pushHistory();
     setPageRotations(prev => {
       const current = prev[pageIndex] || 0;
       return {
@@ -176,6 +224,7 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
 
       storageService.addDocument(newDoc);
+      await storageService.saveDocumentBytes(newDoc.id, pdfBytes.slice());
       setDocuments(storageService.getDocuments());
       addToast('success', 'Saved to My Documents', `${pdfFileName} is secured in your local vault.`);
       return newDoc;
@@ -186,7 +235,9 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteDocument = (id: string) => {
+    if (!window.confirm('Remove this document from the local vault?')) return;
     storageService.deleteDocument(id);
+    void storageService.deleteDocumentBytes(id);
     setDocuments(storageService.getDocuments());
     addToast('info', 'Document Removed', 'The file was removed from your vault.');
   };
@@ -200,6 +251,37 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setActiveTool(tool);
     setCurrentView('tools');
   };
+
+  useEffect(() => {
+    void storageService.getSession().then((session) => {
+      if (!session || pdfBytes) return;
+      void loadPdfFromBuffer(session.bytes, session.fileName).then((loaded) => {
+        if (loaded) {
+          setCurrentPage(Math.max(session.currentPage || 1, 1));
+          setZoomLevel(session.zoomLevel || 1);
+          setAnnotations(Array.isArray(session.annotations) ? session.annotations as Annotation[] : []);
+          setPageRotations(session.pageRotations || {});
+        }
+      });
+    });
+    // Recover once when the provider mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!pdfBytes) return;
+    const timeout = window.setTimeout(() => {
+      void storageService.saveSession({
+        fileName: pdfFileName,
+        bytes: pdfBytes.slice(),
+        currentPage,
+        zoomLevel,
+        annotations,
+        pageRotations,
+      });
+    }, 700);
+    return () => window.clearTimeout(timeout);
+  }, [pdfBytes, pdfFileName, currentPage, zoomLevel, annotations, pageRotations]);
 
   return (
     <DocumentContext.Provider
@@ -220,6 +302,10 @@ export const DocumentProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addAnnotation,
         removeAnnotation,
         clearAnnotations,
+        undo,
+        redo,
+        canUndo,
+        canRedo,
         pageRotations,
         rotatePage,
         documents,

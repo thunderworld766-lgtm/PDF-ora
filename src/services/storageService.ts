@@ -19,6 +19,27 @@ const DEFAULT_INTEGRATION: IntegrationConfig = {
 };
 
 const STARTER_DOCUMENTS: DocumentItem[] = [];
+const DB_NAME = 'pdfora_vault';
+const DB_STORE = 'documents';
+const SESSION_STORE = 'session';
+
+const openDocumentDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
+  if (typeof indexedDB === 'undefined') {
+    reject(new Error('IndexedDB is not available in this browser.'));
+    return;
+  }
+  const request = indexedDB.open(DB_NAME, 2);
+  request.onupgradeneeded = () => {
+    if (!request.result.objectStoreNames.contains(DB_STORE)) {
+      request.result.createObjectStore(DB_STORE);
+    }
+    if (!request.result.objectStoreNames.contains(SESSION_STORE)) {
+      request.result.createObjectStore(SESSION_STORE);
+    }
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
 
 export const storageService = {
   getUserProfile(): UserProfile | null {
@@ -66,6 +87,74 @@ export const storageService = {
     const docs = this.getDocuments();
     const updated = docs.map(d => (d.id === id ? { ...d, isStarred: !d.isStarred } : d));
     this.saveDocuments(updated);
+  },
+
+  async saveDocumentBytes(id: string, bytes: Uint8Array): Promise<void> {
+    const db = await openDocumentDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(DB_STORE, 'readwrite');
+      transaction.objectStore(DB_STORE).put(bytes.slice(), id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  },
+
+  async getDocumentBytes(id: string): Promise<Uint8Array | null> {
+    const db = await openDocumentDb();
+    const value = await new Promise<Uint8Array | null>((resolve, reject) => {
+      const transaction = db.transaction(DB_STORE, 'readonly');
+      const request = transaction.objectStore(DB_STORE).get(id);
+      request.onsuccess = () => resolve(request.result instanceof Uint8Array ? request.result : null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value;
+  },
+
+  async deleteDocumentBytes(id: string): Promise<void> {
+    const db = await openDocumentDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(DB_STORE, 'readwrite');
+      transaction.objectStore(DB_STORE).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  },
+
+  async saveSession(session: { fileName: string; bytes: Uint8Array; currentPage: number; zoomLevel: number; annotations: unknown[]; pageRotations: Record<number, number> }): Promise<void> {
+    const db = await openDocumentDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SESSION_STORE, 'readwrite');
+      transaction.objectStore(SESSION_STORE).put(session, 'active-editor');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  },
+
+  async getSession(): Promise<{ fileName: string; bytes: Uint8Array; currentPage: number; zoomLevel: number; annotations: unknown[]; pageRotations: Record<number, number> } | null> {
+    const db = await openDocumentDb();
+    const value = await new Promise<any>((resolve, reject) => {
+      const transaction = db.transaction(SESSION_STORE, 'readonly');
+      const request = transaction.objectStore(SESSION_STORE).get('active-editor');
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value;
+  },
+
+  async clearSession(): Promise<void> {
+    const db = await openDocumentDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(SESSION_STORE, 'readwrite');
+      transaction.objectStore(SESSION_STORE).delete('active-editor');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
   },
 
   getIntegrationConfig(): IntegrationConfig {

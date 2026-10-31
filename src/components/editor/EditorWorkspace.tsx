@@ -19,7 +19,15 @@ import {
   BadgeCheck,
   MousePointer,
   X,
-  Layers
+  Layers,
+  Highlighter,
+  Underline,
+  StickyNote,
+  Square,
+  Circle,
+  Minus,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useDocument } from '../../context/DocumentContext';
@@ -27,6 +35,31 @@ import { renderPageToCanvas, burnAnnotationsIntoPdf, downloadPdf } from '../../s
 import { SignatureModal } from './SignatureModal';
 import { WatermarkModal } from './WatermarkModal';
 import { Annotation } from '../../types';
+
+const PageThumbnail: React.FC<{ pdfBytes: Uint8Array; pageNumber: number; rotation: number }> = ({
+  pdfBytes,
+  pageNumber,
+  rotation,
+}) => {
+  const thumbnailRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!thumbnailRef.current) return;
+    void renderPageToCanvas(pdfBytes, pageNumber, thumbnailRef.current, 0.28, rotation)
+      .catch((error) => {
+        if (!cancelled) console.error(`Failed to render thumbnail ${pageNumber}:`, error);
+      });
+    return () => { cancelled = true; };
+  }, [pdfBytes, pageNumber, rotation]);
+
+  return (
+    <canvas
+      ref={thumbnailRef}
+      className="w-full aspect-[3/4] bg-white rounded shadow-sm block"
+    />
+  );
+};
 
 export const EditorWorkspace: React.FC = () => {
   const {
@@ -41,6 +74,10 @@ export const EditorWorkspace: React.FC = () => {
     addAnnotation,
     removeAnnotation,
     clearAnnotations,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     pageRotations,
     rotatePage,
     loadSampleDocument,
@@ -54,15 +91,32 @@ export const EditorWorkspace: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [activeToolMode, setActiveToolMode] = useState<'select' | 'text' | 'stamp'>('select');
+  const [activeToolMode, setActiveToolMode] = useState<'select' | 'text' | 'stamp' | 'draw' | 'highlight' | 'underline' | 'sticky' | 'rect' | 'ellipse' | 'line'>('select');
   const [selectedStamp, setSelectedStamp] = useState<string>('APPROVED');
   const [isSigModalOpen, setIsSigModalOpen] = useState(false);
   const [isWatermarkModalOpen, setIsWatermarkModalOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [textInputVal, setTextInputVal] = useState('Type annotation...');
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [viewportVersion, setViewportVersion] = useState(0);
+  const drawingRef = useRef<{ x: number; y: number }[]>([]);
+  const isDrawingRef = useRef(false);
 
   // Current page rotation
   const currentRotation = pageRotations[currentPage - 1] || 0;
+
+  useEffect(() => {
+    let frame = 0;
+    const handleResize = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => setViewportVersion((value) => value + 1));
+    };
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   // Render current page onto canvas whenever page, zoom, or rotation changes
   useEffect(() => {
@@ -91,7 +145,7 @@ export const EditorWorkspace: React.FC = () => {
     return () => {
       isCancelled = true;
     };
-  }, [pdfBytes, currentPage, zoomLevel, currentRotation]);
+  }, [pdfBytes, currentPage, zoomLevel, currentRotation, viewportVersion]);
 
   // Handle clicking on page canvas to place annotations
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -111,15 +165,54 @@ export const EditorWorkspace: React.FC = () => {
       });
       setActiveToolMode('select');
     } else if (activeToolMode === 'stamp') {
+      addAnnotation({ pageNumber: currentPage, type: 'stamp', x: Math.round(x), y: Math.round(y), content: selectedStamp });
+      setActiveToolMode('select');
+    } else if (['highlight', 'underline', 'rect', 'ellipse', 'line', 'sticky'].includes(activeToolMode)) {
       addAnnotation({
         pageNumber: currentPage,
-        type: 'stamp',
+        type: activeToolMode as Annotation['type'],
         x: Math.round(x),
         y: Math.round(y),
-        content: selectedStamp,
+        width: activeToolMode === 'underline' || activeToolMode === 'highlight' ? 24 : 12,
+        height: activeToolMode === 'underline' || activeToolMode === 'highlight' ? 3 : 8,
+        content: activeToolMode === 'sticky' ? 'New note' : undefined,
+        color: activeToolMode === 'highlight' ? '#facc15' : '#ef4444',
+        opacity: activeToolMode === 'highlight' ? 0.35 : 1,
       });
       setActiveToolMode('select');
     }
+  };
+
+  const getCanvasPoint = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(100, Math.max(0, ((event.clientX - rect.left) / rect.width) * 100)),
+      y: Math.min(100, Math.max(0, ((event.clientY - rect.top) / rect.height) * 100)),
+    };
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (activeToolMode !== 'draw') return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    isDrawingRef.current = true;
+    drawingRef.current = [getCanvasPoint(event)];
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawingRef.current || activeToolMode !== 'draw') return;
+    const point = getCanvasPoint(event);
+    const last = drawingRef.current[drawingRef.current.length - 1];
+    if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 0.5) drawingRef.current.push(point);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawingRef.current || activeToolMode !== 'draw') return;
+    isDrawingRef.current = false;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (drawingRef.current.length > 1) {
+      addAnnotation({ pageNumber: currentPage, type: 'draw', x: 0, y: 0, points: drawingRef.current, color: '#ef4444', fontSize: 3, opacity: 1 });
+    }
+    drawingRef.current = [];
   };
 
   const handleSaveSignature = (sigDataUrl: string) => {
@@ -160,17 +253,51 @@ export const EditorWorkspace: React.FC = () => {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        if (reader.result) {
-          await loadPdfFromBuffer(reader.result as ArrayBuffer, file.name);
-        }
-      };
-      reader.readAsArrayBuffer(file);
+  const openPdfFile = async (file?: File) => {
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      addToast('error', 'Invalid file type', 'Please drop a PDF file only.');
+      return;
     }
+
+    try {
+      const buffer = await file.arrayBuffer();
+      await loadPdfFromBuffer(buffer, file.name);
+    } catch (error: any) {
+      addToast('error', 'Could not open PDF', error?.message || 'Please choose a valid PDF file.');
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void openPdfFile(e.target.files?.[0]);
+    e.target.value = '';
+  };
+
+  const handleDragEnter = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!nextTarget || !event.currentTarget.contains(nextTarget)) setIsDragActive(false);
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragActive(false);
+    void openPdfFile(event.dataTransfer.files?.[0]);
   };
 
   // Current page annotations
@@ -180,14 +307,26 @@ export const EditorWorkspace: React.FC = () => {
   if (!pdfBytes) {
     return (
       <div className="flex-1 min-h-[calc(100vh-64px)] flex items-center justify-center p-6 bg-slate-950 bg-grid-pattern">
-        <div className="max-w-md w-full p-8 rounded-3xl border border-slate-800 bg-slate-900/80 backdrop-blur-xl text-center shadow-2xl">
+        <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className={`max-w-md w-full p-8 rounded-3xl border-2 bg-slate-900/80 backdrop-blur-xl text-center shadow-2xl transition-all ${isDragActive ? 'border-brand-400 bg-brand-500/10 scale-[1.01]' : 'border-slate-800'}`}
+        >
           <div className="w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 mx-auto mb-4">
             <Layers className="w-8 h-8" />
           </div>
           <h2 className="text-xl font-bold text-white mb-2">No Document Open</h2>
-          <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-            Upload an existing PDF from your computer or launch our interactive pre-loaded business sample to explore the full editing workspace.
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            Drag & drop a PDF anywhere in this panel, upload one from your computer, or launch our interactive sample.
           </p>
+
+          {isDragActive && (
+            <div className="mb-4 py-3 rounded-xl border border-brand-400/40 bg-brand-500/10 text-xs font-bold text-brand-300">
+              Drop PDF to open in editor
+            </div>
+          )}
 
           <input
             ref={fileInputRef}
@@ -220,8 +359,22 @@ export const EditorWorkspace: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] bg-slate-950 select-none overflow-hidden">
-      
+    <div
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className={`relative flex flex-col h-[calc(100vh-64px)] bg-slate-950 select-none overflow-hidden transition-all ${isDragActive ? 'ring-2 ring-inset ring-brand-400' : ''}`}
+    >
+      {isDragActive && (
+        <div className="absolute inset-0 z-50 m-4 rounded-2xl border-2 border-dashed border-brand-400 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="flex items-center gap-3 px-5 py-4 rounded-xl bg-brand-500/15 border border-brand-400/40 text-brand-300 font-bold text-sm shadow-2xl">
+            <UploadCloud className="w-5 h-5" />
+            Drop PDF to switch files
+          </div>
+        </div>
+      )}
+
       {/* Top Workspace Toolbar */}
       <div className="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between shrink-0 gap-2 z-20">
         
@@ -286,6 +439,14 @@ export const EditorWorkspace: React.FC = () => {
             <span className="hidden lg:inline">Add Text</span>
           </button>
 
+          <button onClick={() => setActiveToolMode('draw')} title="Draw with mouse, pen, or stylus" className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${activeToolMode === 'draw' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}><PenTool className="w-3.5 h-3.5" /><span className="hidden xl:inline">Pen</span></button>
+          <button onClick={() => setActiveToolMode('highlight')} title="Highlight text" className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${activeToolMode === 'highlight' ? 'bg-yellow-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}><Highlighter className="w-3.5 h-3.5" /><span className="hidden xl:inline">Highlight</span></button>
+          <button onClick={() => setActiveToolMode('underline')} title="Underline text" className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${activeToolMode === 'underline' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}><Underline className="w-3.5 h-3.5" /><span className="hidden xl:inline">Underline</span></button>
+          <button onClick={() => setActiveToolMode('sticky')} title="Place sticky note" className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${activeToolMode === 'sticky' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}><StickyNote className="w-3.5 h-3.5" /><span className="hidden xl:inline">Note</span></button>
+          <button onClick={() => setActiveToolMode('rect')} title="Rectangle" className={`px-2 py-1 rounded-lg transition-colors ${activeToolMode === 'rect' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}><Square className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setActiveToolMode('ellipse')} title="Ellipse" className={`px-2 py-1 rounded-lg transition-colors ${activeToolMode === 'ellipse' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}><Circle className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setActiveToolMode('line')} title="Line" className={`px-2 py-1 rounded-lg transition-colors ${activeToolMode === 'line' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}><Minus className="w-3.5 h-3.5" /></button>
+
           {/* Add Stamp */}
           <div className="flex items-center">
             <button
@@ -346,7 +507,8 @@ export const EditorWorkspace: React.FC = () => {
 
         {/* Right: Save to Vault & Export */}
         <div className="flex items-center gap-2">
-          
+          <button onClick={undo} disabled={!canUndo} title="Undo" className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><Undo2 className="w-4 h-4" /></button>
+          <button onClick={redo} disabled={!canRedo} title="Redo" className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><Redo2 className="w-4 h-4" /></button>
           <button
             onClick={() => saveCurrentToVault()}
             title="Save into My Documents"
@@ -460,12 +622,7 @@ export const EditorWorkspace: React.FC = () => {
                 }`}
               >
                 <div className="w-full aspect-[3/4] bg-white rounded shadow-sm flex items-center justify-center relative overflow-hidden mb-1.5">
-                  <div
-                    style={{ transform: `rotate(${rot}deg)` }}
-                    className="text-slate-400 text-[10px] font-bold transition-transform"
-                  >
-                    Pg {pageNum}
-                  </div>
+                  <PageThumbnail pdfBytes={pdfBytes} pageNumber={pageNum} rotation={rot} />
                   {rot > 0 && (
                     <div className="absolute top-1 right-1 bg-brand-600 text-white text-[8px] font-bold px-1 rounded">
                       {rot}°
@@ -498,6 +655,10 @@ export const EditorWorkspace: React.FC = () => {
         >
           <div
             onClick={handleCanvasClick}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
             style={{
               transform: `scale(${zoomLevel})`,
               transformOrigin: 'top center',

@@ -13,13 +13,12 @@ import {
   Plus, 
   Download, 
   Trash2, 
-  ExternalLink,
-  CloudLightning
+  ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useDocument } from '../../context/DocumentContext';
 import { formatBytes, formatDate } from '../../utils/cn';
-import { createSamplePDF } from '../../services/samplePdfs';
+import { storageService } from '../../services/storageService';
 
 export const DashboardView: React.FC = () => {
   const { user } = useAuth();
@@ -36,12 +35,12 @@ export const DashboardView: React.FC = () => {
 
   const handleOpenDoc = async (doc: any) => {
     try {
-      if (doc.fileData) {
-        await loadPdfFromBuffer(doc.fileData, doc.name);
-      } else {
-        const sample = await createSamplePDF(doc.name.replace('.pdf', ''));
-        await loadPdfFromBuffer(sample, doc.name);
+      const bytes = await storageService.getDocumentBytes(doc.id);
+      if (!bytes) {
+        addToast('error', 'Document unavailable', 'The original PDF is missing from this browser vault.');
+        return;
       }
+      await loadPdfFromBuffer(bytes, doc.name);
       setCurrentView('editor');
     } catch (err: any) {
       addToast('error', 'Could not open document', err.message);

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Layers, 
   Scissors, 
@@ -28,8 +28,14 @@ import {
   rotatePdfPages, 
   applyWatermark, 
   imagesToPdf, 
-  downloadPdf, 
-  getPdfMetadata 
+  downloadPdf,
+  downloadBlob,
+  getPdfMetadata,
+  compressPdf,
+  encryptPdf,
+  decryptPdf,
+  pdfPagesToImages,
+  reorderPdfPages
 } from '../../services/pdfService';
 import { createSamplePDF } from '../../services/samplePdfs';
 
@@ -38,6 +44,7 @@ export const ToolsWorkspace: React.FC = () => {
 
   const [currentTool, setCurrentTool] = useState<ToolType>(activeTool || 'merge');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [dragActiveTool, setDragActiveTool] = useState<ToolType | null>(null);
 
   // Merge State
   const [mergeFiles, setMergeFiles] = useState<{ id: string; name: string; size: string; bytes: Uint8Array }[]>([]);
@@ -59,6 +66,7 @@ export const ToolsWorkspace: React.FC = () => {
   // Protect State
   const [protectFile, setProtectFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
   const [protectPassword, setProtectPassword] = useState('');
+  const [protectMode, setProtectMode] = useState<'encrypt' | 'decrypt'>('encrypt');
 
   // Watermark State
   const [watermarkFile, setWatermarkFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
@@ -70,6 +78,110 @@ export const ToolsWorkspace: React.FC = () => {
 
   // PDF to Image State
   const [pdfToImgFile, setPdfToImgFile] = useState<{ name: string; bytes: Uint8Array; pageCount: number } | null>(null);
+  const [pdfImageFormat, setPdfImageFormat] = useState<'png' | 'jpeg'>('png');
+  const [organizeFile, setOrganizeFile] = useState<{ name: string; bytes: Uint8Array; pageCount: number } | null>(null);
+  const [organizeOrder, setOrganizeOrder] = useState('');
+
+  useEffect(() => {
+    if (activeTool) setCurrentTool(activeTool);
+  }, [activeTool]);
+
+  const isPdfFile = (file: File) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+  const handleDragEnter = (event: React.DragEvent, tool: ToolType) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragActiveTool(tool);
+  };
+
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!nextTarget || !event.currentTarget.contains(nextTarget)) setDragActiveTool(null);
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const addMergeFiles = async (files: FileList | File[]) => {
+    const pdfFiles = Array.from(files).filter(isPdfFile);
+    if (!pdfFiles.length) {
+      addToast('error', 'Invalid file type', 'Please drop PDF files only.');
+      return;
+    }
+
+    const additions = await Promise.all(pdfFiles.map(async (file, index) => {
+      const buf = await file.arrayBuffer();
+      return {
+        id: `${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+        name: file.name,
+        size: `${(file.size / 1024).toFixed(1)} KB`,
+        bytes: new Uint8Array(buf),
+      };
+    }));
+    setMergeFiles((prev) => [...prev, ...additions]);
+    addToast('success', 'PDFs added', `${additions.length} file${additions.length > 1 ? 's' : ''} added to the merge list.`);
+  };
+
+  const addImageFiles = (files: FileList | File[]) => {
+    const imageFilesToAdd = Array.from(files).filter((file) =>
+      file.type === 'image/png' || file.type === 'image/jpeg' || /\.(png|jpe?g)$/i.test(file.name)
+    );
+    if (!imageFilesToAdd.length) {
+      addToast('error', 'Invalid file type', 'Please drop PNG or JPG images only.');
+      return;
+    }
+
+    imageFilesToAdd.forEach((file, index) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          setImageFiles((prev) => [...prev, {
+            id: `${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+            name: file.name,
+            dataUrl: reader.result as string,
+            width: img.width,
+            height: img.height,
+          }]);
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const loadSinglePdf = async (file: File, tool: ToolType) => {
+    if (!isPdfFile(file)) {
+      addToast('error', 'Invalid file type', 'Please drop a PDF file only.');
+      return;
+    }
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+
+    try {
+      if (tool === 'split') {
+        const meta = await getPdfMetadata(bytes);
+        setSplitFile({ name: file.name, bytes, pageCount: meta.pageCount });
+      } else if (tool === 'compress') {
+        setCompressFile({ name: file.name, size: file.size, bytes });
+        setCompressedResult(null);
+      } else if (tool === 'rotate') {
+        const meta = await getPdfMetadata(bytes);
+        setRotateFile({ name: file.name, bytes, pageCount: meta.pageCount });
+      } else if (tool === 'protect') {
+        setProtectFile({ name: file.name, bytes });
+      } else if (tool === 'watermark') {
+        setWatermarkFile({ name: file.name, bytes });
+      }
+    } catch (error: any) {
+      addToast('error', 'Could not read PDF', error?.message || 'Please choose a valid PDF file.');
+    }
+  };
 
   // Available Tools Switcher List
   const toolsMenu: { id: ToolType; label: string; icon: React.ReactNode }[] = [
@@ -80,6 +192,8 @@ export const ToolsWorkspace: React.FC = () => {
     { id: 'protect', label: 'Protect & Encrypt', icon: <Lock className="w-4 h-4 text-emerald-400" /> },
     { id: 'watermark', label: 'Watermark PDF', icon: <ShieldAlert className="w-4 h-4 text-rose-400" /> },
     { id: 'img-to-pdf', label: 'Image to PDF', icon: <FileCheck className="w-4 h-4 text-fuchsia-400" /> },
+    { id: 'pdf-to-img', label: 'PDF to Images', icon: <ImageIcon className="w-4 h-4 text-cyan-400" /> },
+    { id: 'organize', label: 'Organize Pages', icon: <Layers className="w-4 h-4 text-orange-400" /> },
   ];
 
   // Helper to load sample files for quick testing
@@ -119,19 +233,32 @@ export const ToolsWorkspace: React.FC = () => {
     if (!splitFile) return;
     try {
       setIsProcessing(true);
-      // Parse range e.g. "1-2" or "1,2"
-      const indices: number[] = [];
+      const indices = new Set<number>();
       const parts = splitRange.split(',');
-      parts.forEach((p) => {
-        if (p.includes('-')) {
-          const [start, end] = p.split('-').map((n) => parseInt(n.trim(), 10) - 1);
-          for (let i = start; i <= end; i++) indices.push(i);
+      for (const part of parts) {
+        const token = part.trim();
+        if (!token) continue;
+        if (token.includes('-')) {
+          const match = token.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+          if (!match) throw new Error(`Invalid page range: "${token}"`);
+          const start = Number(match[1]);
+          const end = Number(match[2]);
+          if (start < 1 || end < start || end > splitFile.pageCount) {
+            throw new Error(`Page range must be between 1 and ${splitFile.pageCount}.`);
+          }
+          for (let page = start; page <= end; page++) indices.add(page - 1);
         } else {
-          indices.push(parseInt(p.trim(), 10) - 1);
+          if (!/^\d+$/.test(token)) throw new Error(`Invalid page number: "${token}"`);
+          const page = Number(token);
+          if (page < 1 || page > splitFile.pageCount) {
+            throw new Error(`Page number must be between 1 and ${splitFile.pageCount}.`);
+          }
+          indices.add(page - 1);
         }
-      });
+      }
+      if (!indices.size) throw new Error('Enter at least one valid page number.');
 
-      const resultBytes = await splitPdf(splitFile.bytes, indices);
+      const resultBytes = await splitPdf(splitFile.bytes, Array.from(indices));
       downloadPdf(resultBytes, `pdfora_split_${splitRange}.pdf`);
       addToast('success', 'PDF Split Done!', `Pages ${splitRange} extracted.`);
     } catch (err: any) {
@@ -163,14 +290,10 @@ export const ToolsWorkspace: React.FC = () => {
     if (!compressFile) return;
     try {
       setIsProcessing(true);
-      // Simulation of optimization pass
-      await new Promise((r) => setTimeout(r, 900));
-      const factor = compressionLevel === 'extreme' ? 0.45 : compressionLevel === 'recommended' ? 0.65 : 0.85;
-      const newSize = Math.round(compressFile.size * factor);
-      const savedPercent = Math.round((1 - factor) * 100);
-
-      setCompressedResult({ newSize, savedPercent });
-      downloadPdf(compressFile.bytes, `pdfora_compressed_${compressFile.name}`);
+      const optimized = await compressPdf(compressFile.bytes, compressionLevel);
+      const savedPercent = Math.max(0, Math.round((1 - optimized.byteLength / compressFile.size) * 100));
+      setCompressedResult({ newSize: optimized.byteLength, savedPercent });
+      downloadPdf(optimized, `pdfora_compressed_${compressFile.name}`);
       addToast('success', 'PDF Compressed!', `Reduced by ${savedPercent}%. Download ready.`);
     } catch (err: any) {
       addToast('error', 'Compression error', err.message);
@@ -183,13 +306,11 @@ export const ToolsWorkspace: React.FC = () => {
     if (!protectFile || !protectPassword) return;
     try {
       setIsProcessing(true);
-      // We apply standard security stamp + encrypted container
-      const securedBytes = await applyWatermark(protectFile.bytes, 'PROTECTED DOCUMENT', {
-        opacity: 0.15,
-        fontSize: 32,
-      });
-      downloadPdf(securedBytes, `pdfora_protected_${protectFile.name}`);
-      addToast('success', 'PDF Protected', 'Security layer & signature hash embedded.');
+      const result = protectMode === 'encrypt'
+        ? await encryptPdf(protectFile.bytes, protectPassword)
+        : await decryptPdf(protectFile.bytes, protectPassword);
+      downloadPdf(result, `pdfora_${protectMode === 'encrypt' ? 'protected' : 'unlocked'}_${protectFile.name}`);
+      addToast('success', protectMode === 'encrypt' ? 'PDF Protected' : 'Password Removed', protectMode === 'encrypt' ? 'AES-256 password protection added.' : 'The unlocked PDF has been downloaded.');
     } catch (err: any) {
       addToast('error', 'Protection error', err.message);
     } finally {
@@ -209,6 +330,36 @@ export const ToolsWorkspace: React.FC = () => {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handlePdfToImagesAction = async () => {
+    if (!pdfToImgFile) return;
+    try {
+      setIsProcessing(true);
+      const images = await pdfPagesToImages(pdfToImgFile.bytes, pdfImageFormat, 2);
+      for (const image of images) downloadBlob(image.blob, `${pdfToImgFile.name.replace(/\.pdf$/i, '')}_${image.name}`);
+      addToast('success', 'Images Created', `${images.length} page${images.length > 1 ? 's' : ''} downloaded.`);
+    } catch (err: any) {
+      addToast('error', 'PDF to image error', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleOrganizeAction = async () => {
+    if (!organizeFile) return;
+    try {
+      setIsProcessing(true);
+      const indices = organizeOrder.split(',').map((value) => Number(value.trim()) - 1);
+      if (!indices.length || indices.some((index) => !Number.isInteger(index) || index < 0 || index >= organizeFile.pageCount)) throw new Error(`Use page numbers from 1 to ${organizeFile.pageCount}, separated by commas.`);
+      if (new Set(indices).size !== indices.length) throw new Error('Duplicate pages are not allowed.');
+      if (indices.length !== organizeFile.pageCount && !window.confirm('Some pages will be omitted or deleted. Download the organized PDF?')) return;
+      const result = await reorderPdfPages(organizeFile.bytes, indices);
+      downloadPdf(result, `pdfora_organized_${organizeFile.name}`);
+      addToast('success', 'Pages Organized', 'The reordered PDF has been downloaded.');
+    } catch (err: any) {
+      addToast('error', 'Organize error', err.message);
+    } finally { setIsProcessing(false); }
   };
 
   const handleImagesToPdfAction = async () => {
@@ -295,11 +446,20 @@ export const ToolsWorkspace: React.FC = () => {
               {/* Upload Drop Zone */}
               <div
                 onClick={() => mergeInputRef.current?.click()}
-                className="p-6 rounded-2xl border-2 border-dashed border-slate-700 hover:border-brand-500 bg-slate-950/60 flex flex-col items-center justify-center cursor-pointer transition-colors group"
+                onDragEnter={(event) => handleDragEnter(event, 'merge')}
+                onDragLeave={handleDragLeave}
+                onDragOver={handleDragOver}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDragActiveTool(null);
+                  void addMergeFiles(event.dataTransfer.files);
+                }}
+                className={`p-6 rounded-2xl border-2 border-dashed ${dragActiveTool === 'merge' ? 'border-brand-400 bg-brand-500/10 scale-[1.01]' : 'border-slate-700 hover:border-brand-500 bg-slate-950/60'} flex flex-col items-center justify-center cursor-pointer transition-all group`}
               >
                 <UploadCloud className="w-10 h-10 text-slate-500 group-hover:text-brand-400 mb-2 transition-colors" />
                 <span className="text-xs font-semibold text-white">
-                  Click to select PDF files to merge
+                  {dragActiveTool === 'merge' ? 'Drop PDF files here' : 'Drag & drop or click to select PDF files'}
                 </span>
                 <span className="text-[10px] text-slate-500 mt-0.5">
                   Select multiple files simultaneously
@@ -310,22 +470,9 @@ export const ToolsWorkspace: React.FC = () => {
                   multiple
                   accept="application/pdf"
                   className="hidden"
-                  onChange={async (e) => {
-                    const files = e.target.files;
-                    if (!files) return;
-                    for (let i = 0; i < files.length; i++) {
-                      const f = files[i];
-                      const buf = await f.arrayBuffer();
-                      setMergeFiles((prev) => [
-                        ...prev,
-                        {
-                          id: `${Date.now()}_${i}`,
-                          name: f.name,
-                          size: `${(f.size / 1024).toFixed(1)} KB`,
-                          bytes: new Uint8Array(buf),
-                        },
-                      ]);
-                    }
+                  onChange={(e) => {
+                    if (e.target.files) void addMergeFiles(e.target.files);
+                    e.target.value = '';
                   }}
                 />
               </div>
@@ -389,8 +536,18 @@ export const ToolsWorkspace: React.FC = () => {
               </div>
 
               {!splitFile ? (
-                <div className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center">
+                <div
+                  onDragEnter={(event) => handleDragEnter(event, 'split')}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(event) => {
+                    event.preventDefault(); setDragActiveTool(null);
+                    const file = event.dataTransfer.files?.[0]; if (file) void loadSinglePdf(file, 'split');
+                  }}
+                  className={`p-8 rounded-2xl border-2 border-dashed ${dragActiveTool === 'split' ? 'border-brand-400 bg-brand-500/10' : 'border-slate-700 bg-slate-950/60'} flex flex-col items-center justify-center transition-all`}
+                >
                   <UploadCloud className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-xs font-semibold text-white mb-3">{dragActiveTool === 'split' ? 'Drop PDF here' : 'Drag & drop PDF here or select a file'}</span>
                   <label className="cursor-pointer px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-500 transition-colors">
                     <span>Select PDF File</span>
                     <input
@@ -474,8 +631,18 @@ export const ToolsWorkspace: React.FC = () => {
               </div>
 
               {!compressFile ? (
-                <div className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center">
+                <div
+                  onDragEnter={(event) => handleDragEnter(event, 'compress')}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(event) => {
+                    event.preventDefault(); setDragActiveTool(null);
+                    const file = event.dataTransfer.files?.[0]; if (file) void loadSinglePdf(file, 'compress');
+                  }}
+                  className={`p-8 rounded-2xl border-2 border-dashed ${dragActiveTool === 'compress' ? 'border-brand-400 bg-brand-500/10' : 'border-slate-700 bg-slate-950/60'} flex flex-col items-center justify-center transition-all`}
+                >
                   <UploadCloud className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-xs font-semibold text-white mb-3">{dragActiveTool === 'compress' ? 'Drop PDF here' : 'Drag & drop PDF here or select a file'}</span>
                   <label className="cursor-pointer px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-500 transition-colors">
                     <span>Choose PDF to Compress</span>
                     <input
@@ -588,8 +755,18 @@ export const ToolsWorkspace: React.FC = () => {
               </div>
 
               {!rotateFile ? (
-                <div className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center">
+                <div
+                  onDragEnter={(event) => handleDragEnter(event, 'rotate')}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(event) => {
+                    event.preventDefault(); setDragActiveTool(null);
+                    const file = event.dataTransfer.files?.[0]; if (file) void loadSinglePdf(file, 'rotate');
+                  }}
+                  className={`p-8 rounded-2xl border-2 border-dashed ${dragActiveTool === 'rotate' ? 'border-brand-400 bg-brand-500/10' : 'border-slate-700 bg-slate-950/60'} flex flex-col items-center justify-center transition-all`}
+                >
                   <UploadCloud className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-xs font-semibold text-white mb-3">{dragActiveTool === 'rotate' ? 'Drop PDF here' : 'Drag & drop PDF here or select a file'}</span>
                   <label className="cursor-pointer px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-500 transition-colors">
                     <span>Choose PDF to Rotate</span>
                     <input
@@ -675,8 +852,18 @@ export const ToolsWorkspace: React.FC = () => {
               </div>
 
               {!protectFile ? (
-                <div className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center">
+                <div
+                  onDragEnter={(event) => handleDragEnter(event, 'protect')}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(event) => {
+                    event.preventDefault(); setDragActiveTool(null);
+                    const file = event.dataTransfer.files?.[0]; if (file) void loadSinglePdf(file, 'protect');
+                  }}
+                  className={`p-8 rounded-2xl border-2 border-dashed ${dragActiveTool === 'protect' ? 'border-brand-400 bg-brand-500/10' : 'border-slate-700 bg-slate-950/60'} flex flex-col items-center justify-center transition-all`}
+                >
                   <UploadCloud className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-xs font-semibold text-white mb-3">{dragActiveTool === 'protect' ? 'Drop PDF here' : 'Drag & drop PDF here or select a file'}</span>
                   <label className="cursor-pointer px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-500 transition-colors">
                     <span>Select PDF to Protect</span>
                     <input
@@ -711,9 +898,13 @@ export const ToolsWorkspace: React.FC = () => {
                     </button>
                   </div>
 
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setProtectMode('encrypt')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${protectMode === 'encrypt' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400'}`}>Add Password</button>
+                    <button onClick={() => setProtectMode('decrypt')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${protectMode === 'decrypt' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400'}`}>Remove Password</button>
+                  </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-1">
-                      Set Document Password:
+                      {protectMode === 'encrypt' ? 'Set Document Password:' : 'Enter Current Password:'}
                     </label>
                     <input
                       type="password"
@@ -731,7 +922,7 @@ export const ToolsWorkspace: React.FC = () => {
                       className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs shadow-lg shadow-brand-600/30 flex items-center gap-2 disabled:opacity-50"
                     >
                       <Lock className="w-4 h-4" />
-                      <span>{isProcessing ? 'Securing...' : 'Encrypt & Download'}</span>
+                      <span>{isProcessing ? (protectMode === 'encrypt' ? 'Securing...' : 'Unlocking...') : (protectMode === 'encrypt' ? 'Encrypt & Download' : 'Remove Password & Download')}</span>
                     </button>
                   </div>
                 </div>
@@ -753,8 +944,18 @@ export const ToolsWorkspace: React.FC = () => {
               </div>
 
               {!watermarkFile ? (
-                <div className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center">
+                <div
+                  onDragEnter={(event) => handleDragEnter(event, 'watermark')}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(event) => {
+                    event.preventDefault(); setDragActiveTool(null);
+                    const file = event.dataTransfer.files?.[0]; if (file) void loadSinglePdf(file, 'watermark');
+                  }}
+                  className={`p-8 rounded-2xl border-2 border-dashed ${dragActiveTool === 'watermark' ? 'border-brand-400 bg-brand-500/10' : 'border-slate-700 bg-slate-950/60'} flex flex-col items-center justify-center transition-all`}
+                >
                   <UploadCloud className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-xs font-semibold text-white mb-3">{dragActiveTool === 'watermark' ? 'Drop PDF here' : 'Drag & drop PDF here or select a file'}</span>
                   <label className="cursor-pointer px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-500 transition-colors">
                     <span>Select PDF to Watermark</span>
                     <input
@@ -816,6 +1017,44 @@ export const ToolsWorkspace: React.FC = () => {
             </div>
           )}
 
+          {/* ===================== ORGANIZE PAGES ===================== */}
+          {currentTool === 'organize' && (
+            <div className="space-y-6">
+              <div className="border-b border-slate-800 pb-4"><h2 className="text-lg font-bold text-white">Delete or Reorder Pages</h2><p className="text-xs text-slate-400 mt-0.5">Enter a comma-separated page order. Listed pages are kept; omitted pages are deleted.</p></div>
+              {!organizeFile ? (
+                <label className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center cursor-pointer"><UploadCloud className="w-10 h-10 text-slate-500 mb-2"/><span className="text-xs font-semibold text-white">Choose PDF to organize</span><input type="file" accept="application/pdf,.pdf" className="hidden" onChange={async (e) => {const file=e.target.files?.[0];if(!file)return;try{const bytes=new Uint8Array(await file.arrayBuffer());const meta=await getPdfMetadata(bytes);setOrganizeFile({name:file.name,bytes,pageCount:meta.pageCount});setOrganizeOrder(Array.from({length:meta.pageCount},(_,i)=>i+1).join(','));}catch(err:any){addToast('error','Could not read PDF',err.message)}}}/></label>
+              ) : (
+                <div className="space-y-4"><div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between"><div><div className="text-xs font-semibold text-white">{organizeFile.name}</div><div className="text-[11px] text-slate-400">{organizeFile.pageCount} pages</div></div><button onClick={() => setOrganizeFile(null)} className="text-xs text-slate-400">Change File</button></div><label className="block text-xs text-slate-300">Keep and reorder pages<input value={organizeOrder} onChange={(e)=>setOrganizeOrder(e.target.value)} placeholder="3,1,2" className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white" /></label><div className="flex justify-end pt-3 border-t border-slate-800"><button onClick={handleOrganizeAction} disabled={isProcessing || !organizeOrder.trim()} className="px-6 py-2.5 rounded-xl bg-brand-600 text-white font-semibold text-xs flex items-center gap-2"><Download className="w-4 h-4"/>Organize & Download</button></div></div>
+              )}
+            </div>
+          )}
+
+          {/* ===================== PDF TO IMAGES ===================== */}
+          {currentTool === 'pdf-to-img' && (
+            <div className="space-y-6">
+              <div className="border-b border-slate-800 pb-4">
+                <h2 className="text-lg font-bold text-white">Convert PDF to Images</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Download every page as a high-resolution PNG or JPEG.</p>
+              </div>
+              {!pdfToImgFile ? (
+                <label className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center cursor-pointer">
+                  <UploadCloud className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-xs font-semibold text-white">Choose PDF to convert</span>
+                  <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={async (e) => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    try { const bytes = new Uint8Array(await file.arrayBuffer()); const meta = await getPdfMetadata(bytes); setPdfToImgFile({ name: file.name, bytes, pageCount: meta.pageCount }); } catch (err: any) { addToast('error', 'Could not read PDF', err.message); }
+                  }} />
+                </label>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between"><div><div className="text-xs font-semibold text-white">{pdfToImgFile.name}</div><div className="text-[11px] text-slate-400">{pdfToImgFile.pageCount} pages</div></div><button onClick={() => setPdfToImgFile(null)} className="text-xs text-slate-400">Change File</button></div>
+                  <div className="flex gap-2"><button onClick={() => setPdfImageFormat('png')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${pdfImageFormat === 'png' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400'}`}>PNG</button><button onClick={() => setPdfImageFormat('jpeg')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${pdfImageFormat === 'jpeg' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400'}`}>JPEG</button></div>
+                  <div className="flex justify-end pt-3 border-t border-slate-800"><button onClick={handlePdfToImagesAction} disabled={isProcessing} className="px-6 py-2.5 rounded-xl bg-brand-600 text-white font-semibold text-xs flex items-center gap-2"><Download className="w-4 h-4" />{isProcessing ? 'Converting...' : 'Convert & Download'}</button></div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ===================== IMAGE TO PDF TOOL ===================== */}
           {currentTool === 'img-to-pdf' && (
             <div className="space-y-6">
@@ -831,10 +1070,19 @@ export const ToolsWorkspace: React.FC = () => {
 
               <div
                 onClick={() => imgInputRef.current?.click()}
-                className="p-8 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/60 flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 transition-colors group"
+                onDragEnter={(event) => handleDragEnter(event, 'img-to-pdf')}
+                onDragLeave={handleDragLeave}
+                onDragOver={handleDragOver}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDragActiveTool(null);
+                  addImageFiles(event.dataTransfer.files);
+                }}
+                className={`p-8 rounded-2xl border-2 border-dashed ${dragActiveTool === 'img-to-pdf' ? 'border-brand-400 bg-brand-500/10 scale-[1.01]' : 'border-slate-700 hover:border-brand-500 bg-slate-950/60'} flex flex-col items-center justify-center cursor-pointer transition-all group`}
               >
                 <ImageIcon className="w-10 h-10 text-slate-500 group-hover:text-brand-400 mb-2 transition-colors" />
-                <span className="text-xs font-semibold text-white">Click to select images (PNG, JPG)</span>
+                <span className="text-xs font-semibold text-white">{dragActiveTool === 'img-to-pdf' ? 'Drop images here' : 'Drag & drop or click to select images (PNG, JPG)'}</span>
                 <input
                   ref={imgInputRef}
                   type="file"
@@ -842,29 +1090,8 @@ export const ToolsWorkspace: React.FC = () => {
                   accept="image/png, image/jpeg"
                   className="hidden"
                   onChange={(e) => {
-                    const files = e.target.files;
-                    if (!files) return;
-                    for (let i = 0; i < files.length; i++) {
-                      const f = files[i];
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        const img = new Image();
-                        img.onload = () => {
-                          setImageFiles((prev) => [
-                            ...prev,
-                            {
-                              id: `${Date.now()}_${i}`,
-                              name: f.name,
-                              dataUrl: reader.result as string,
-                              width: img.width,
-                              height: img.height,
-                            },
-                          ]);
-                        };
-                        img.src = reader.result as string;
-                      };
-                      reader.readAsDataURL(f);
-                    }
+                    if (e.target.files) addImageFiles(e.target.files);
+                    e.target.value = '';
                   }}
                 />
               </div>
